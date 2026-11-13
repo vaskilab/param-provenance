@@ -10,6 +10,16 @@ from .checker import (
     Violation,
     check_call,
 )
+from .outcome import (
+    OUTCOME_CLAIM_MISMATCH,
+    Outcome,
+    OutcomeViolation,
+    check_outcome_reply,
+    claims_success,
+    classify_outcome,
+    idempotency_key,
+    render_reply,
+)
 from .rules import ABORT, WARN, RuleError, RuleSet, SourceRule
 from .trace import (
     REF_KEY,
@@ -45,5 +55,13 @@ __all__ = [
     "is_ref",
     "resolve_ref",
     "resolve_args",
+    "Outcome",
+    "OutcomeViolation",
+    "classify_outcome",
+    "check_outcome_reply",
+    "claims_success",
+    "render_reply",
+    "idempotency_key",
+    "OUTCOME_CLAIM_MISMATCH",
     "__version__",
 ]

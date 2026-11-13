@@ -2,7 +2,7 @@
 
 **Schema 校验的是参数的形状，这个库校验的是参数的出身。**
 
-在 LLM Agent 的写操作执行之前，拦住被编造出来的工具参数。零依赖，Python 3.9+。
+在 LLM Agent 的写操作影响用户之前，拦住两类故障：**参数编造**和**失败报成功**。零依赖，Python 3.9+。
 
 [English](README.md) · [背景文章](docs/article-zh.md)
 
@@ -40,10 +40,11 @@ JSON Schema，包括 strict 模式和结构化输出，能表达：
 ```bash
 git clone https://github.com/vaskilab/param-provenance.git
 cd param-provenance
-python examples/demo.py
+python examples/demo.py           # 参数编造
+python examples/demo_outcome.py   # 失败报成功
 ```
 
-不用安装、不用 API key、不联网。五个场景直接打印判定结果。
+不用安装、不用 API key、不联网。十一个场景直接打印判定结果。
 
 ## 用法
 
@@ -128,11 +129,37 @@ not present in result of step 1
 - **判卷环节没有模型参与。** 纯规则计算，成本接近零，所以它应该待在评测流水线最便宜的那一层，而不是躲在 LLM judge 后面。
 - **多次结果累积。** 分页查询的每一页都贡献合法来源。
 
+## 第二个检查：失败报成功
+
+一次工具调用有四种结果，不是两种：
+
+| 状态 | 含义 | 允许的话术 |
+|---|---|---|
+| `SUCCESS` | 明确成功，副作用已确认 | 「已完成」 |
+| `FAILED` | 明确报错，确定未生效 | 「未完成」 |
+| `UNKNOWN` | 请求已发出，没收到响应 | 「未确认」+ 如何核对 |
+| `PARTIAL` | 批量操作部分生效 | 给出数量，不能说「全部完成」 |
+
+```python
+from provenance import classify_outcome, check_outcome_reply, render_reply
+
+outcome = classify_outcome(ok=True, timed_out=True)   # -> Outcome.UNKNOWN
+check_outcome_reply(outcome, "已完成")                 # -> 违规
+render_reply(outcome, action="催办工单", verify_hint="工单详情页")
+```
+
+`UNKNOWN` 是最常被实现折叠成成功或失败的那一种。两种折叠都错：写操作可能已经生效。
+报成功会误导用户；报失败会诱导重试，从而重复执行。`idempotency_key()` 从业务身份
+派生稳定键，让服务端可以去重。
+
+成功语义检测是**启发式粗筛**，不是语义判定。它会排除否定式（「未完成」）和疑问式
+（「核对是否已生效」）。它判不了的措辞应该落到更高一层评测。
+
 ## 边界
 
-这是一个刻意做窄的检查。它**不做**这些事：
+这是两个刻意做窄的检查。它们**不做**这些事：
 
-- 不检测其他类别的 Agent 幻觉（该调工具却跳过、失败报成功、跨实体污染、路由到不存在的工具）
+- 不检测其余类别的 Agent 幻觉（该调工具却跳过、跨实体污染、路由到不存在的工具）
 - 不判断一次工具调用在语义上是否恰当
 - 不替代服务端鉴权——服务端要再校验一遍，因为任何客户端约束都可能被一次 Prompt 改动或模型升级抹掉
 
@@ -144,7 +171,11 @@ not present in result of step 1
 python -m unittest discover -s tests -v
 ```
 
-25 个用例，只用标准库。
+54 个用例，只用标准库。
+
+CI 覆盖 Python 3.11、3.12、3.13。代码只用标准库，并且所有模块都带了
+`from __future__ import annotations`，因此 3.9 和 3.10 预期同样可用——只是
+不再纳入 CI，因为当前的 Ubuntu runner 已不再发布 Python 3.9 的构建。
 
 ## 状态
 

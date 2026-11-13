@@ -2,7 +2,8 @@
 
 **Schema validation checks the shape of a value. This checks where it came from.**
 
-Catches fabricated tool arguments in LLM agents before they execute. Zero dependencies, Python 3.9+.
+Catches two classes of agent tool-call failure before they reach your users:
+**fabricated arguments** and **false success reports**. Zero dependencies, Python 3.9+.
 
 [中文文档](README.zh-CN.md) · [Background article](docs/article-zh.md)
 
@@ -47,10 +48,11 @@ live in your execution layer.
 ```bash
 git clone https://github.com/vaskilab/param-provenance.git
 cd param-provenance
-python examples/demo.py
+python examples/demo.py           # fabricated arguments
+python examples/demo_outcome.py   # false success reports
 ```
 
-No install step, no API key, no network. Five scenarios print their verdicts.
+No install step, no API key, no network. Eleven scenarios print their verdicts.
 
 ## Usage
 
@@ -144,12 +146,40 @@ context" check passes it. A field-level source rule does not.
   not behind an LLM judge.
 - **Multiple results accumulate.** Paginated queries all contribute valid sources.
 
+## Second check: false success reports
+
+A tool call has four outcomes, not two:
+
+| State | Meaning | Allowed wording |
+|---|---|---|
+| `SUCCESS` | explicit success, side effect confirmed | "done" |
+| `FAILED` | explicit error, known not applied | "not done" |
+| `UNKNOWN` | request sent, no response | "unconfirmed" + how to verify |
+| `PARTIAL` | batch, some applied | counts, never "all done" |
+
+```python
+from provenance import classify_outcome, check_outcome_reply, render_reply
+
+outcome = classify_outcome(ok=True, timed_out=True)   # -> Outcome.UNKNOWN
+check_outcome_reply(outcome, "已完成")                 # -> violation
+render_reply(outcome, action="催办工单", verify_hint="工单详情页")
+```
+
+`UNKNOWN` is the state most implementations collapse into success or failure.
+Both are wrong: the write may have landed. Reporting success misleads the user;
+reporting failure invites a retry that double-applies it. `idempotency_key()`
+derives a stable key from business identity so retries can be deduplicated.
+
+Success-phrase detection is a **heuristic first-pass filter**, not a semantic
+judge. It excludes negated ("未完成") and interrogative ("核对是否已生效")
+framing. Wording it cannot resolve should fall through to a higher tier.
+
 ## Scope
 
-This is one check, deliberately narrow. It does **not**:
+These are two checks, deliberately narrow. They do **not**:
 
-- detect the other classes of agent hallucination (skipped tool calls, false
-  success reports, cross-entity contamination, routing to nonexistent tools)
+- detect the remaining classes of agent hallucination (skipped tool calls,
+  cross-entity contamination, routing to nonexistent tools)
 - decide whether a tool call is semantically appropriate
 - replace server-side authorization — validate again on the server, since any
   client-side constraint can be undone by a prompt change or a model upgrade
@@ -162,7 +192,12 @@ It is meant to sit alongside those, as the cheapest and most deterministic layer
 python -m unittest discover -s tests -v
 ```
 
-25 tests, standard library only.
+54 tests, standard library only.
+
+CI runs on Python 3.11, 3.12 and 3.13. The code uses nothing beyond the standard
+library and relies on `from __future__ import annotations`, so 3.9 and 3.10 are
+expected to work — they are simply no longer covered by CI, because Python 3.9
+builds are not published for current Ubuntu runners.
 
 ## Status
 
